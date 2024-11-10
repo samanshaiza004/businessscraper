@@ -6,6 +6,11 @@ export interface Business {
   email?: string;
   website?: string;
   websiteScore?: number;
+  reviewCount?: number;
+  averageRating?: number;
+  introduction?: string;
+  storeType?: string;
+  openingHours?: string;
   lastContacted?: string;
   status: "new" | "contacted" | "following_up" | "converted" | "not_interested";
   notes?: string;
