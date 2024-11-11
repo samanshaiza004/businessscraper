@@ -1,15 +1,19 @@
 import { chromium, type Page } from "playwright";
-import type { Business } from "../src/types/business";
+import type { Business } from "./types/business";
 import { ScrapeResult } from "./types/scrapingjob";
+import { Logger } from "./Logger";
 
 export class MapsScraper {
   private static readonly TIMEOUT = 60000;
+  private static readonly logger = new Logger("MapsScraper");
 
   static async scrapeBusinesses(
     query: string,
     location: string,
     limit: number = 10
   ): Promise<ScrapeResult[]> {
+    this.logger.info(`Starting scraping job`, { query, location, limit });
+
     const browser = await chromium.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
@@ -23,32 +27,36 @@ export class MapsScraper {
 
     const page = await context.newPage();
     console.log(`Starting scrape for: ${query} in ${location}`);
-
     try {
       // Navigate to Google Maps
+      this.logger.info(`Navigating to Google Maps`);
       await page.goto("https://www.google.com/maps", {
         timeout: this.TIMEOUT,
         waitUntil: "networkidle",
       });
 
       // Search for businesses
+      this.logger.info(`Initiating search for: "${query}" in "${location}"`);
       const searchBox = await page.waitForSelector("#searchboxinput");
       await searchBox?.fill(`${query} in ${location}`);
       await page.keyboard.press("Enter");
 
-      // Wait for results to load
+      // Wait for results to load in the left sidebar
+      this.logger.info(`Waiting for search results to load`);
       await page.waitForSelector(
         'a[href^="https://www.google.com/maps/place"]'
       );
-
       // Scroll to load more results
+      this.logger.info(`Loading more results up to limit: ${limit}`);
       const listings = await this.loadMoreResults(page, limit);
-      console.log(`Found ${listings.length} results`);
+      this.logger.info(`Found ${listings.length} total listings`);
 
       // Process each listing
       const results: ScrapeResult[] = [];
-      for (const listing of listings.slice(0, limit)) {
+      for (let i = 0; i < listings.length; i++) {
+        const listing = listings[i];
         try {
+          this.logger.info(`Processing listing ${i + 1}/${listings.length}`);
           await listing.click();
 
           // Wait for business details panel to load
@@ -58,21 +66,33 @@ export class MapsScraper {
           const result = await this.extractBusinessData(page);
           if (result.name) {
             results.push(result);
+            this.logger.info(`Successfully extracted data for: ${result.name}`);
+          } else {
+            this.logger.warn(
+              `Skipping listing ${i + 1} - No business name found`
+            );
           }
 
-          // Add a short wait to ensure the next listing can be clicked properly
           await page.waitForTimeout(2000);
         } catch (error) {
-          console.error("Error processing listing:", error);
+          this.logger.error(`Error processing listing ${i + 1}`, error);
           continue;
         }
       }
 
+      this.logger.info(`Scraping completed successfully`, {
+        totalResults: results.length,
+        successRate: `${((results.length / listings.length) * 100).toFixed(
+          1
+        )}%`,
+      });
+
       return results;
     } catch (error) {
-      console.error("Scraping failed:", error);
+      this.logger.error(`Scraping job failed`, error);
       throw error;
     } finally {
+      this.logger.info(`Cleaning up browser resources`);
       await context.close();
       await browser.close();
     }
@@ -84,36 +104,79 @@ export class MapsScraper {
   ): Promise<any[]> {
     let previousCount = 0;
     let attempts = 0;
-    const maxAttempts = 10;
+    const maxAttempts = 5;
+
+    const feedContainer = await page.waitForSelector('div[role="feed"]');
+    if (!feedContainer) {
+      this.logger.error("Could not find results feed container");
+      return [];
+    }
 
     while (attempts < maxAttempts) {
-      await page.mouse.wheel(0, 10000);
+      await feedContainer.evaluate((element) => {
+        element.scrollTo(0, element.scrollHeight);
+      });
       await page.waitForTimeout(2000);
 
       const listings = await page.$$(
         'a[href^="https://www.google.com/maps/place"]'
       );
 
+      this.logger.info(`Scroll attempt ${attempts + 1}/${maxAttempts}`, {
+        currentListings: listings.length,
+        desiredListings: desired,
+      });
+
+      if (listings.length < desired) {
+        this.logger.info(
+          `Found fewer listings than desired - reached end of available results`,
+          {
+            found: listings.length,
+            desired,
+          }
+        );
+        return listings;
+      }
+
       if (listings.length >= desired) {
+        this.logger.info(`Reached desired number of listings`, {
+          found: listings.length,
+          desired,
+        });
         return listings.slice(0, desired);
       }
 
       if (listings.length === previousCount) {
-        attempts++;
-      } else {
-        previousCount = listings.length;
-        attempts = 0;
+        this.logger.info(
+          `No new listings found after scrolling - reached end of results`,
+          {
+            totalFound: listings.length,
+          }
+        );
+        return listings;
       }
+
+      previousCount = listings.length;
+      attempts++;
     }
 
-    return await page.$$('a[href^="https://www.google.com/maps/place"]');
+    this.logger.info(`Finished loading results`, {
+      foundListings: previousCount,
+      desiredListings: desired,
+    });
+
+    // Return all found listings, even if fewer than desired
+    const finalListings = await page.$$(
+      'div[role="feed"] > div[role="article"]'
+    );
+    return finalListings;
   }
 
   private static async extractBusinessData(page: Page): Promise<ScrapeResult> {
     const selectors = {
       name: "h1.DUwDvf",
       address: 'button[data-item-id="address"] div.fontBodyMedium',
-      website: 'a[data-item-id="authority"]', // Updated to grab the anchor tag directly
+      website: 'a[data-item-id="authority"]',
       phone: 'button[data-item-id^="phone:tel:"] div.fontBodyMedium',
       reviewCount: "div.F7nice span[aria-label]",
       rating: 'div.F7nice span[aria-hidden="true"]',
@@ -126,7 +189,11 @@ export class MapsScraper {
       try {
         await page.waitForSelector(selector, { timeout: 2000 });
         return await page.$eval(selector, (el) => el.textContent || "");
-      } catch {
+      } catch (error) {
+        this.logger.warn(
+          `Failed to extract text for selector: ${selector}`,
+          error
+        );
         return "";
       }
     };
@@ -136,22 +203,26 @@ export class MapsScraper {
       return num ? parseFloat(num) : 0;
     };
 
+    this.logger.info(`Starting data extraction for business`);
+
     const name = await getText(selectors.name);
     const reviewText = await getText(selectors.reviewCount);
     const ratingText = await getText(selectors.rating);
 
-    // Extract website URL from the 'website' selector, if available
     let websiteUrl = "";
     try {
       const websiteElement = await page.$(selectors.website);
       if (websiteElement) {
         websiteUrl = (await websiteElement.getAttribute("href")) || "";
+        this.logger.info(`Website URL found: ${websiteUrl}`);
+      } else {
+        this.logger.info(`No website URL found for business`);
       }
     } catch (error) {
-      console.error("Website URL not found for this business:", error);
+      this.logger.error(`Error extracting website URL`, error);
     }
 
-    return {
+    const result: ScrapeResult = {
       name: name.trim(),
       address: (await getText(selectors.address)).trim(),
       website: websiteUrl,
@@ -165,5 +236,14 @@ export class MapsScraper {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+
+    this.logger.info(`Data extraction completed`, {
+      businessName: result.name,
+      hasWebsite: !!result.website,
+      hasPhone: !!result.phone,
+      hasReviews: !!result.reviewCount,
+    });
+
+    return result;
   }
 }

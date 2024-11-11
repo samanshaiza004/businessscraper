@@ -10,6 +10,7 @@
     "typescript": "5"
   },
   "dependencies": {
+    "@elysiajs/cors": "^1.1.1",
     "elysia": "1",
     "playwright": "^1.48.2"
   }

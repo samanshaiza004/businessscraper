@@ -1,4 +1,5 @@
 import { Elysia, NotFoundError } from "elysia";
+import { cors } from "@elysiajs/cors";
 import { MapsScraper } from "./MapScraper";
 import { ScrapeResult, ScrapingJob } from "./types/scrapingjob";
 import type { Business } from "./types/business";
@@ -17,6 +18,13 @@ interface JobWithResults extends ScrapingJob {
 const jobs = new Map<string, JobWithResults>();
 
 const app = new Elysia()
+  .use(
+    cors({
+      origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      credentials: true,
+    })
+  )
   .onError(({ error, set }) => {
     console.error("API Error:", error);
     if (error instanceof NotFoundError) {
@@ -93,6 +101,7 @@ const app = new Elysia()
 
 console.log(`Listening on ${app.server!.url}`);
 
+// Rest of your code remains the same...
 function validateAndTransformBusiness(result: ScrapeResult): Business | null {
   // Ensure all required fields are present
   if (!result.name) {
