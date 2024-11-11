@@ -1,8 +1,8 @@
 import { Elysia, NotFoundError } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { MapsScraper } from "./MapScraper";
-import { ScrapeResult, ScrapingJob } from "./types/scrapingjob";
-import type { Business } from "./types/business";
+import { ScrapeResult, ScrapingJob } from "../../types/scrapingjob";
+import type { Business } from "../../types/business";
 
 interface ScrapeRequest {
   query: string;

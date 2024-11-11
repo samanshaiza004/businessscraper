@@ -1,6 +1,6 @@
 import { chromium, type Page } from "playwright";
-import type { Business } from "./types/business";
-import { ScrapeResult } from "./types/scrapingjob";
+import type { Business } from "../../types/business";
+import { ScrapeResult } from "../../types/scrapingjob";
 import { Logger } from "./Logger";
 
 export class MapsScraper {

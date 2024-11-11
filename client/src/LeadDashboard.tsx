@@ -1,4 +1,7 @@
 import { useState, useEffect } from "react";
+import { Business } from "../../types/business";
+import { JobWithResults, ScrapingJob } from "../../types/scrapingjob";
+
 import {
   Card,
   CardContent,
@@ -39,7 +42,7 @@ const LeadsDashboard = () => {
   const [progress, setProgress] = useState<string | null>(null);
 
   useEffect(() => {
-    let intervalId: string | number | NodeJS.Timeout | undefined;
+    let intervalId: number | NodeJS.Timeout | undefined;
 
     if (currentJobId && jobStatus === "pending") {
       intervalId = setInterval(checkJobStatus, 5000);
